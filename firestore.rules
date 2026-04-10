@@ -1,0 +1,215 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches Auth UID)
+    // Fields:
+    //   - uid: string (required) - Firebase Auth UID
+    //   - email: string (required) - User email
+    //   - displayName: string (optional) - User's name
+    //   - role: string (required) - 'patient', 'doctor', or 'admin'
+    //   - doctorUid: string (optional) - UID of assigned doctor (for patients)
+    //   - createdAt: timestamp (required) - Account creation time
+    //
+    // Collection: tremors
+    // Fields:
+    //   - userId: string (required) - Patient UID
+    //   - doctorUid: string (optional) - Denormalized doctor UID for access
+    //   - timestamp: timestamp (required) - Time of recording
+    //   - severity: number (required) - 0-10 scale
+    //   - rawSummary: string (optional) - Processed sensor data
+    //   - notes: string (optional) - Patient notes
+    //
+    // Collection: medications
+    // Fields:
+    //   - userId: string (required) - Patient UID
+    //   - doctorUid: string (optional) - Denormalized doctor UID for access
+    //   - name: string (required) - Medication name
+    //   - dosage: string (optional)
+    //   - frequency: string (optional)
+    //   - nextRefill: timestamp (optional)
+    //   - adherenceLogs: list (optional) - List of timestamps
+    //
+    // Collection: appointments
+    // Fields:
+    //   - patientId: string (required) - Patient UID
+    //   - doctorId: string (required) - Doctor UID
+    //   - scheduledAt: timestamp (required)
+    //   - status: string (required) - 'pending', 'confirmed', 'rejected', 'cancelled'
+    //   - type: string (required) - 'virtual' or 'in-person'
+    //
+    // Collection: messages
+    // Fields:
+    //   - senderId: string (required)
+    //   - receiverId: string (required)
+    //   - participants: list (required) - [senderId, receiverId]
+    //   - encryptedContent: string (required)
+    //   - timestamp: timestamp (required)
+    //   - roomId: string (required)
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDoctor() {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'doctor';
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email in ["vivek9042105968@gmail.com", "rbviv46@gmail.com"] ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    function isDoctorOf(patientData) {
+      return isDoctor() && 
+             patientData != null && 
+             'doctorUid' in patientData && 
+             patientData.doctorUid == request.auth.uid;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function fieldUnchanged(field) {
+      return !(field in request.resource.data) || request.resource.data[field] == resource.data[field];
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.uid is string &&
+             data.email is string && isValidEmail(data.email) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             data.role in ['patient', 'doctor', 'admin'] &&
+             (!('doctorUid' in data) || data.doctorUid is string) &&
+             (!('doctorNotes' in data) || (data.doctorNotes is string && data.doctorNotes.size() < 5000));
+    }
+
+    function isValidTremor(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.severity is number && data.severity >= 0 && data.severity <= 10 &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000)) &&
+             (!('doctorUid' in data) || data.doctorUid is string);
+    }
+
+    function isValidMedication(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             (!('dosage' in data) || (data.dosage is string && data.dosage.size() < 100)) &&
+             (!('frequency' in data) || (data.frequency is string && data.frequency.size() < 100)) &&
+             (!('doctorUid' in data) || data.doctorUid is string);
+    }
+
+    function isValidAppointment(data) {
+      return data.patientId is string &&
+             data.doctorId is string &&
+             data.status in ['pending', 'confirmed', 'rejected', 'cancelled'] &&
+             data.type in ['virtual', 'in-person'];
+    }
+
+    function isValidMessage(data) {
+      return data.senderId is string && data.senderId == request.auth.uid &&
+             data.senderRole in ['patient', 'doctor'] &&
+             data.receiverId is string &&
+             data.participants is list && data.participants.size() == 2 &&
+             request.auth.uid in data.participants &&
+             data.encryptedContent is string && data.encryptedContent.size() < 5000;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isDoctorOf(resource.data));
+      allow create: if isAuthenticated() && isOwner(userId) && request.resource.data.uid == request.auth.uid && isValidUser(request.resource.data);
+      allow update: if isAuthenticated() && (
+        (isOwner(userId) && request.resource.data.uid == request.auth.uid && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin())) ||
+        (isDoctorOf(resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['doctorNotes']) && isValidUser(request.resource.data))
+      );
+    }
+
+    match /tremors/{tremorId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || (isDoctor() && resource.data.doctorUid == request.auth.uid));
+      allow create: if isAuthenticated() && isValidTremor(request.resource.data);
+      allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+    }
+
+    match /medications/{medId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || (isDoctor() && resource.data.doctorUid == request.auth.uid));
+      allow create: if isAuthenticated() && isValidMedication(request.resource.data);
+      allow update: if isAuthenticated() && (
+        (isOwner(resource.data.userId) && isValidMedication(request.resource.data)) || 
+        (isDoctor() && resource.data.doctorUid == request.auth.uid && hasOnlyAllowedFields(resource.data.keys()))
+      );
+      allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+    }
+
+    match /appointments/{appId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.patientId) || isOwner(resource.data.doctorId));
+      allow create: if isAuthenticated() && (isOwner(request.resource.data.patientId) || isOwner(request.resource.data.doctorId)) && isValidAppointment(request.resource.data);
+      allow update: if isAuthenticated() && (
+        // Patients can only cancel their own appointments
+        (isOwner(resource.data.patientId) && 
+         request.resource.data.status == 'cancelled' && 
+         fieldUnchanged('patientId') && fieldUnchanged('doctorId') && fieldUnchanged('scheduledAt')) ||
+        // Doctors can confirm, reject, or cancel
+        (isOwner(resource.data.doctorId) && 
+         request.resource.data.status in ['confirmed', 'rejected', 'cancelled'] &&
+         fieldUnchanged('patientId') && fieldUnchanged('doctorId') && fieldUnchanged('scheduledAt'))
+      );
+      allow delete: if isAuthenticated() && (isOwner(resource.data.patientId) || isOwner(resource.data.doctorId));
+    }
+
+    match /messages/{msgId} {
+      allow read: if isAuthenticated() && request.auth.uid in resource.data.participants;
+      allow create: if isAuthenticated() && isValidMessage(request.resource.data);
+    }
+
+    match /sessions/{sessionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        // Allow the creator to update anything
+        resource.data.userId == request.auth.uid ||
+        // Allow the phone user (even if different) to update status and results
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'result'])
+      );
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    match /checklists/{checklistId} {
+      allow read: if isAuthenticated() && isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update, delete: if isAuthenticated() && isOwner(resource.data.userId);
+    }
+
+    match /checklist_logs/{logId} {
+      allow read: if isAuthenticated() && isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update: if isAuthenticated() && isOwner(resource.data.userId);
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "TremorTrack: Parkinson's Care & Detection",
+  "description": "A comprehensive Parkinson's management platform featuring tremor detection via smartphone sensors, AI-powered medical assistance, real-time doctor-patient communication, and personalized lifestyle recommendations.",
+  "requestFramePermissions": ["camera", "microphone"]
+}

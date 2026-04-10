@@ -1,0 +1,114 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user profile information and roles.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["patient", "doctor"] },
+        "doctorUid": { "type": "string", "description": "UID of the assigned doctor (for patients)" },
+        "doctorNotes": { "type": "string", "description": "Private notes from the doctor about the patient" },
+        "status": { "type": "string", "enum": ["stable", "attention", "critical"], "description": "Current health status of the patient" },
+        "lastSeen": { "type": "string", "format": "date-time", "description": "Last time the user was active" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "TremorRecord": {
+      "title": "Tremor Record",
+      "description": "Summary of recorded sensor data for tremor analysis.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "severity": { "type": "number", "description": "Calculated tremor intensity (0-10)" },
+        "rawSummary": { "type": "string", "description": "JSON string of processed sensor peaks" },
+        "notes": { "type": "string" }
+      },
+      "required": ["userId", "timestamp", "severity"]
+    },
+    "Medication": {
+      "title": "Medication",
+      "description": "Medication schedule and adherence tracking.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "dosage": { "type": "string" },
+        "frequency": { "type": "string" },
+        "nextRefill": { "type": "string", "format": "date-time" },
+        "adherenceLogs": { "type": "array", "items": { "type": "string", "format": "date-time" } }
+      },
+      "required": ["userId", "name"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Scheduled consultations between patients and doctors.",
+      "type": "object",
+      "properties": {
+        "patientId": { "type": "string" },
+        "doctorId": { "type": "string" },
+        "scheduledAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled"] },
+        "type": { "type": "string", "enum": ["virtual", "in-person"] }
+      },
+      "required": ["patientId", "doctorId", "scheduledAt"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "End-to-end encrypted message between doctor and patient.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["patient", "doctor"] },
+        "receiverId": { "type": "string" },
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "encryptedContent": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "roomId": { "type": "string" }
+      },
+      "required": ["senderId", "receiverId", "participants", "encryptedContent", "timestamp", "roomId"]
+    },
+    "Session": {
+      "title": "Remote Session",
+      "description": "Temporary session for remote tremor detection via QR code.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "status": { "type": "string", "enum": ["waiting", "recording", "completed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "result": { 
+          "type": "object",
+          "properties": {
+            "severity": { "type": "number" }
+          }
+        }
+      },
+      "required": ["userId", "status", "createdAt"]
+    },
+    "ChecklistLog": {
+      "title": "Checklist Log",
+      "description": "Historical record of daily checklist completion.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "completedCount": { "type": "number" },
+        "totalCount": { "type": "number" }
+      },
+      "required": ["userId", "date", "completedCount", "totalCount"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "User", "description": "User profiles" },
+    "/tremors/{tremorId}": { "schema": "TremorRecord", "description": "Tremor detection logs" },
+    "/medications/{medId}": { "schema": "Medication", "description": "Patient medications" },
+    "/appointments/{appId}": { "schema": "Appointment", "description": "Medical appointments" },
+    "/messages/{msgId}": { "schema": "ChatMessage", "description": "Encrypted chat history" },
+    "/sessions/{sessionId}": { "schema": "Session", "description": "Remote sensor sessions" },
+    "/checklist_logs/{logId}": { "schema": "ChecklistLog", "description": "Daily checklist history" }
+  }
+}
